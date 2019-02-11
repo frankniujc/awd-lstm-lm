@@ -11,6 +11,8 @@ import model
 
 from utils import batchify, get_batch, repackage_hidden
 
+torch.cuda.set_device(3)
+
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='data/penn',
                     help='location of the data corpus')
@@ -34,7 +36,18 @@ args = parser.parse_args()
 # Load data
 ###############################################################################
 
-corpus = data.Corpus(args.data)
+# corpus = data.Corpus(args.data)
+import os
+import hashlib
+fn = 'corpus.{}.data'.format(hashlib.md5(args.data.encode()).hexdigest())
+if os.path.exists(fn):
+    print('Loading cached dataset...')
+    corpus = torch.load(fn)
+else:
+    print('Producing dataset...')
+    corpus = data.Corpus(args.data)
+    torch.save(corpus, fn)
+
 
 eval_batch_size = 1
 test_batch_size = 1

@@ -11,6 +11,8 @@ import model
 
 from utils import batchify, get_batch, repackage_hidden
 
+torch.cuda.set_device(3)
+
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='data/penn/',
                     help='location of the data corpus')
@@ -75,7 +77,19 @@ if torch.cuda.is_available():
 # Load data
 ###############################################################################
 
-corpus = data.Corpus(args.data)
+# corpus = data.Corpus(args.data)
+
+import os
+import hashlib
+fn = 'corpus.{}.data'.format(hashlib.md5(args.data.encode()).hexdigest())
+if os.path.exists(fn):
+    print('Loading cached dataset...')
+    corpus = torch.load(fn)
+else:
+    print('Producing dataset...')
+    corpus = data.Corpus(args.data)
+    torch.save(corpus, fn)
+
 
 eval_batch_size = 10
 test_batch_size = 1
@@ -87,15 +101,15 @@ test_data = batchify(corpus.test, test_batch_size, args)
 # Build the model
 ###############################################################################
 
-ntokens = len(corpus.dictionary)
-model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
-if args.cuda:
-    model.cuda()
-total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
-print('Args:', args)
-print('Model total parameters:', total_params)
+# Load the best saved model.
+with open(args.save, 'rb') as f:
+    model, criterion, _ = torch.load(f)
 
-criterion = nn.CrossEntropyLoss()
+params = list(model.parameters()) + list(criterion.parameters())
+total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in params if x.size())
+print('args:', args)
+print('model total parameters:', total_params)
+
 
 ###############################################################################
 # Training code
@@ -103,18 +117,17 @@ criterion = nn.CrossEntropyLoss()
 
 def evaluate(data_source, batch_size=10):
     # Turn on evaluation mode which disables dropout.
-    if args.model == 'QRNN': model.reset()
     model.eval()
+    if args.model == 'QRNN': model.reset()
     total_loss = 0
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
         output, hidden = model(data, hidden)
-        output_flat = output.view(-1, ntokens)
-        total_loss += len(data) * criterion(output_flat, targets).data
+        total_loss += len(data) * criterion(model.decoder.weight, model.decoder.bias, output, targets).data
         hidden = repackage_hidden(hidden)
-    return total_loss[0] / len(data_source)
+    return total_loss.item() / len(data_source)
 
 
 def train():
@@ -130,7 +143,7 @@ def train():
         # Prevent excessively small or negative sequence lengths
         seq_len = max(5, int(np.random.normal(bptt, 5)))
         # There's a very small chance that it could select a very long sequence length resulting in OOM
-        seq_len = min(seq_len, args.bptt + 10)
+        # seq_len = min(seq_len, args.bptt + 10)
 
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
@@ -143,38 +156,33 @@ def train():
         optimizer.zero_grad()
 
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-        raw_loss = criterion(output.view(-1, ntokens), targets)
+        raw_loss = criterion(model.decoder.weight, model.decoder.bias, output, targets)
 
         loss = raw_loss
-        # Activiation Regularization
-        loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
-        # Temporal Activation Regularization (slowness)
-        loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
+        # activiation regularization
+        if args.alpha: loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
+        # temporal activation regularization (slowness)
+        if args.beta: loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
         loss.backward()
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        # `clip_grad_norm` helps prevent the exploding gradient problem in rnns / lstms.
+        if args.clip: torch.nn.utils.clip_grad_norm_(params, args.clip)
         optimizer.step()
 
         total_loss += raw_loss.data
         optimizer.param_groups[0]['lr'] = lr2
         if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss.item() / args.log_interval
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f}'.format(
+            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
+                    'loss {:5.2f} | ppl {:8.2f} | bpc {:8.3f}'.format(
                 epoch, batch, len(train_data) // args.bptt, optimizer.param_groups[0]['lr'],
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss), cur_loss / math.log(2)))
             total_loss = 0
             start_time = time.time()
         ###
         batch += 1
         i += seq_len
-
-
-# Load the best saved model.
-with open(args.save, 'rb') as f:
-    model = torch.load(f)
 
 
 # Loop over epochs.
@@ -203,7 +211,7 @@ try:
 
             if val_loss2 < stored_loss:
                 with open(args.save, 'wb') as f:
-                    torch.save(model, f)
+                    torch.save([model, criterion, optimizer], f)
                 print('Saving Averaged!')
                 stored_loss = val_loss2
 
@@ -224,7 +232,7 @@ except KeyboardInterrupt:
 
 # Load the best saved model.
 with open(args.save, 'rb') as f:
-    model = torch.load(f)
+    model, _, _ = torch.load(f)
     
 # Run on test data.
 test_loss = evaluate(test_data, test_batch_size)

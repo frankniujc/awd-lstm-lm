@@ -6,11 +6,28 @@ from utils import batchify, get_batch, repackage_hidden
 
 import itertools
 
-checkpoint = './checkpoints/WT2.pt'
+# checkpoint = './checkpoints/WT2.pt'
+checkpoint = 'language_models/wt2_qrnn.pt'
+data = 'data/wikitext-2'
+torch.cuda.set_device(2)
+device = torch.device(2)
 
 with open(checkpoint, 'rb') as f:
-    model, criterion, _ = torch.load(f)
-corpus = data.Corpus('data/wikitext-2')
+    model, criterion, _ = torch.load(f, map_location=device)
+
+
+import os
+import hashlib
+fn = 'corpus.{}.data'.format(hashlib.md5(data.encode()).hexdigest())
+if os.path.exists(fn):
+    print('loading cached dataset...')
+    corpus = torch.load(fn)
+else:
+    print('producing dataset...')
+    corpus = data.corpus(args.data)
+    torch.save(corpus, fn)
+
+
 
 dictionary = corpus.dictionary
 

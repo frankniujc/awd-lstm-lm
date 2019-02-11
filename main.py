@@ -10,6 +10,8 @@ import model
 
 from utils import batchify, get_batch, repackage_hidden
 
+torch.cuda.set_device(2)
+
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='data/penn/',
                     help='location of the data corpus')
@@ -197,13 +199,13 @@ def train():
         raw_loss = criterion(model.decoder.weight, model.decoder.bias, output, targets)
 
         loss = raw_loss
-        # Activiation Regularization
+        # activiation regularization
         if args.alpha: loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
-        # Temporal Activation Regularization (slowness)
+        # temporal activation regularization (slowness)
         if args.beta: loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
         loss.backward()
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+        # `clip_grad_norm` helps prevent the exploding gradient problem in rnns / lstms.
         if args.clip: torch.nn.utils.clip_grad_norm_(params, args.clip)
         optimizer.step()
 
@@ -226,6 +228,8 @@ def train():
 lr = args.lr
 best_val_loss = []
 stored_loss = 100000000
+
+print('start training')
 
 # At any point you can hit Ctrl + C to break out of training early.
 try:

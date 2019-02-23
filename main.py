@@ -54,6 +54,8 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default=randomhash+'.pt',
                     help='path to save the final model')
+parser.add_argument('--checkpoints', type=str,  default=randomhash,
+                    help='path to save the checkpoints')
 parser.add_argument('--alpha', type=float, default=2,
                     help='alpha L2 regularization on RNN activation (alpha = 0 means no regularization)')
 parser.add_argument('--beta', type=float, default=1,
@@ -140,6 +142,8 @@ if not criterion:
         # WikiText-103
         splits = [2800, 20000, 76000]
     print('Using', splits)
+    print(args.emsize, splits)
+    exit()
     criterion = SplitCrossEntropyLoss(args.emsize, splits=splits, verbose=False)
 ###
 if args.cuda:
@@ -285,6 +289,9 @@ try:
                 model_save('{}.e{}'.format(args.save, epoch))
                 print('Dividing learning rate by 10')
                 optimizer.param_groups[0]['lr'] /= 10.
+
+            if args.checkpoints:
+                model_save(f'{args.checkpoints}_ep{epoch}.pt')
 
             best_val_loss.append(val_loss)
 

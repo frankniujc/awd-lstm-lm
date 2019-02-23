@@ -7,10 +7,12 @@ from utils import batchify, get_batch, repackage_hidden
 import itertools
 
 # checkpoint = './checkpoints/WT2.pt'
-checkpoint = 'language_models/wt2_qrnn.pt'
-data = 'data/wikitext-2'
-torch.cuda.set_device(2)
-device = torch.device(2)
+checkpoint = '../models/BNC.18hr.QRNN.pt'
+data = 'data/bnc'
+torch.cuda.set_device(3)
+device = torch.device(3)
+
+torch.manual_seed(1234)
 
 with open(checkpoint, 'rb') as f:
     model, criterion, _ = torch.load(f, map_location=device)
@@ -34,7 +36,7 @@ dictionary = corpus.dictionary
 def tokenize_sent(sent):
     return torch.LongTensor([dictionary.word2idx[x] for x in sent]).cuda()
 
-sent = 'colorless green ideas dream furiously'.split()
+sent = 'colourless green ideas sleep furiously'.split()
 
 for perm in itertools.permutations(sent):
 
